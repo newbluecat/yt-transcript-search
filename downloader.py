@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 import yt_dlp
 from youtube_transcript_api import (
+    CouldNotRetrieveTranscript,
     FetchedTranscript,
     NoTranscriptFound,
     TranscriptsDisabled,
@@ -188,6 +189,13 @@ def _get_transcripts(
 
             result: TranscriptResult | None = future.result()
             if result is not None:
+                if result.status == "IP_BLOCKED":
+                    for f in futures:
+                        f.cancel()
+                    raise ConnectionError(
+                        "YouTube has temporarily blocked your IP address due to too many requests.",
+                    )
+
                 results.append(result)
 
             if on_callback is not None:
@@ -227,6 +235,10 @@ def _get_single_transcript(
                 transcript=None,
                 status="RETRYABLE",
             )
+        except CouldNotRetrieveTranscript as e:
+            if "IP" in str(e):
+                return TranscriptResult(video_id, None, "IP_BLOCKED")
+            return TranscriptResult(video_id, None, "RETRYABLE")
 
         except Exception:
             # print(str(e))

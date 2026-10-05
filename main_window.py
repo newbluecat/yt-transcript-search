@@ -213,7 +213,7 @@ class MainWindow(QMainWindow):
         """Export the current table results to a CSV file."""
         row_count: int = self.results_table.rowCount()
         if row_count == 0:
-            self.progress_bar.setFormat("No results to save.")
+            self.progress_bar.setFormat("No results to save")
             return
 
         file_path, _ = QFileDialog.getSaveFileName(
@@ -273,7 +273,7 @@ class MainWindow(QMainWindow):
                 database.clear_database(conn)
                 self.progress_bar.setRange(0, 100)
                 self.progress_bar.setValue(100)
-                self.progress_bar.setFormat("Database wiped successfully.")
+                self.progress_bar.setFormat("Database wiped successfully")
             except Exception as e:
                 self.on_error(f"Failed to wipe database: {e!s}")
             finally:
@@ -367,7 +367,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(100)
 
         if result_count == 0:
-            self.progress_bar.setFormat("No results found.")
+            self.progress_bar.setFormat("No results found")
             return
 
         self.progress_bar.setFormat(f"Found {result_count} results!")
