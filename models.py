@@ -50,6 +50,7 @@ class SearchResult(NamedTuple):
     video_id: str
     title: str
     channel: str
+    upload_date: str
     start_time: float
     snippet: str
     rank: float

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import concurrent.futures
 import datetime
+import os
+import platform
 import random
+import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 import yt_dlp
@@ -22,30 +26,81 @@ if TYPE_CHECKING:
     import sqlite3
     from collections.abc import Callable
 
+
+def _get_quickjs_path() -> str | None:
+    is_windows: bool = os.name == "nt"
+    exe_name: str = "quickjs.exe" if is_windows else "quickjs"
+
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        qjs_exe: Path = Path(sys._MEIPASS) / exe_name
+    else:
+        if is_windows:
+            os_dir: str = "win"
+        elif sys.platform == "darwin":
+            os_dir = "mac"
+        else:
+            os_dir = "linux"
+
+        arch: str = platform.machine().lower()
+        arch_map: dict[str, str] = {
+            "amd64": "x86_64",
+            "x86_64": "x86_64",
+            "aarch64": "arm64",
+            "arm64": "arm64",
+        }
+
+        arch_dir: str = arch_map.get(arch, arch)
+        qjs_exe = Path(__file__).parent / "bin" / os_dir / arch_dir / exe_name
+
+    if qjs_exe.exists():
+        return str(qjs_exe)
+
+    return None
+
+
 YT_DLP_OPTS: Final[dict[str, Any]] = {
     "quiet": True,
-    "extract_flat": "in_playlist",
+    "extract_flat": True,
     "skip_download": True,
     "playlistend": 10000,
+    "extractor_args": {"youtubetab": ["approximate_date"]},
 }
 
+_quickjs_path: str | None = _get_quickjs_path()
+if _quickjs_path is not None:
+    YT_DLP_OPTS["js_runtimes"] = [_quickjs_path]
 
-def _build_playlist_url(identifier: str) -> str:
-    """Convert a valid ID into a playlist URL."""
+
+def _build_url(identifier: str, source_type: str) -> str:
+    """Construct a valid YouTube url given the ID and the source type."""
     clean_id: str = identifier.strip()
-    return f"https://www.youtube.com/playlist?list={clean_id}"
+
+    if source_type == "Playlist":
+        return f"https://www.youtube.com/playlist?list={clean_id}"
+
+    if clean_id.startswith("UC"):
+        base_url: str = f"https://www.youtube.com/channel/{clean_id}"
+    else:
+        handle: str = clean_id if clean_id.startswith("@") else f"@{clean_id}"
+        base_url = f"https://www.youtube.com/{handle}"
+
+    if source_type == "Channel (Videos)":
+        return f"{base_url}/videos"
+    if source_type == "Channel (Live)":
+        return f"{base_url}/streams"
+    if source_type == "Channel (Shorts)":
+        return f"{base_url}/shorts"
+
+    raise ValueError("Unknown error occurred.")
 
 
-def _build_channel_url(identifier: str) -> str:
-    """Convert a valid handle into a channel URL."""
-    clean_handle: str = identifier.strip()
-    if not clean_handle.startswith("@"):
-        clean_handle = f"@{clean_handle}"
-    return f"https://www.youtube.com/{clean_handle}/videos"
-
-
-def _get_records(url: str) -> list[VideoMetadata]:
+def _get_records(url: str, start_date: datetime.date | None = None) -> list[VideoMetadata]:
     """Scrape video metadata from URL with a single yt-dlp request."""
+    opts: dict[str, Any] = YT_DLP_OPTS.copy()
+
+    if start_date is not None:
+        opts["dateafter"] = start_date.strftime("%Y%m%d")
+
     records: list[VideoMetadata] = []
 
     # if playlist doesn't exist, let process_target handle it
@@ -174,6 +229,7 @@ def _get_single_transcript(
             )
 
         except Exception:
+            # print(str(e))
             if attempt == max_retries - 1:
                 return TranscriptResult(
                     video_id=video_id,
@@ -403,13 +459,9 @@ def process_target(
     is_cancelled: Callable[[], bool] | None = None,
 ) -> None:
     """Coordinate inserting transcript chunks from url in batches."""
-    url: str = (
-        _build_playlist_url(search_params.target_id)
-        if search_params.source_type == "Playlist"
-        else _build_channel_url(search_params.target_id)
-    )
+    url: str = _build_url(search_params.target_id, search_params.source_type)
 
-    metadata: list[VideoMetadata] = _get_records(url)
+    metadata: list[VideoMetadata] = _get_records(url, search_params.start_date)
     if not metadata:
         if progress_callback is not None:
             progress_callback(0, 0, f"{search_params.source_type} has no videos")

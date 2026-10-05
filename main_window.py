@@ -1,18 +1,22 @@
+import csv
 import datetime
-import html
 import urllib.parse
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from PySide6.QtCore import QDate, Qt
+from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDateEdit,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QRadioButton,
@@ -22,9 +26,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import database
 from models import SearchParams
 
 if TYPE_CHECKING:
+    import sqlite3
+
     from database import SearchResult
 
 from search_worker import SearchWorker
@@ -50,8 +57,8 @@ QPROGRESS_ERROR_STYLESHEET = """
 class MainWindow(QMainWindow):
     """Main window interface."""
 
-    def __init__(self) -> None:  # noqa: PLR0915
-        """Initialize the main UI."""
+    def __init__(self) -> None:
+        """Initialize main window."""
         super().__init__()
         self.setWindowTitle("YouTube Transcript Search")
         self.resize(650, 700)
@@ -60,20 +67,41 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout: QVBoxLayout = QVBoxLayout(central_widget)
 
-        # search results table
+        self._setup_menu_bar()
+        self._setup_results_table(main_layout)
+        self._setup_search_options(main_layout)
+        self._setup_progress_and_buttons(main_layout)
+
+    def _setup_menu_bar(self) -> None:
+        """Construct the top menu bar."""
+        file_menu = self.menuBar().addMenu("Options")
+
+        export_action = file_menu.addAction("Export Results to CSV")
+        export_action.triggered.connect(self.on_export_clicked)
+        wipe_action = file_menu.addAction("Clear Database")
+        wipe_action.triggered.connect(self.on_wipe_db_clicked)
+
+        file_menu.addSeparator()
+
+        exit_action = file_menu.addAction("Exit")
+        exit_action.triggered.connect(self.close)
+
+    def _setup_results_table(self, main_layout: QVBoxLayout) -> None:
         self.results_table: QTableWidget = QTableWidget()
-        self.results_table.setColumnCount(4)
-        self.results_table.setHorizontalHeaderLabels(["Title", "Channel", "Time (s)", "Snippet"])
+        self.results_table.setColumnCount(5)
+        self.results_table.setHorizontalHeaderLabels(["Title", "Channel", "Date", "Time", "Snippet"])
         self.results_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.results_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.results_table.verticalHeader().setVisible(False)
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.results_table.horizontalHeader().setStretchLastSection(True)
         self.results_table.setShowGrid(False)
+        self.results_table.setSortingEnabled(True)
+        self.results_table.cellClicked.connect(self.on_cell_clicked)
 
         main_layout.addWidget(self.results_table, stretch=1)
 
-        # source selection dropdown
+    def _setup_search_options(self, main_layout: QVBoxLayout) -> None:
         options_layout: QVBoxLayout = QVBoxLayout()
 
         source_id_row: QHBoxLayout = QHBoxLayout()
@@ -84,10 +112,11 @@ class MainWindow(QMainWindow):
                 "Playlist",
                 "Channel (Videos)",
                 "Channel (Live)",
+                "Channel (Shorts)",
             ],
         )
 
-        # id input text box
+        # --- ID Input Text Box ---
         id_label: QLabel = QLabel("ID:")
         self.id_input: QLineEdit = QLineEdit()
         self.source_combo.currentTextChanged.connect(self.on_source_changed)
@@ -100,7 +129,7 @@ class MainWindow(QMainWindow):
         source_id_row.addWidget(self.id_input, stretch=1)
         options_layout.addLayout(source_id_row)
 
-        # upload date filter with selection
+        # --- Upload Date Filter ---
         date_row: QHBoxLayout = QHBoxLayout()
         date_label: QLabel = QLabel("Upload Date:")
 
@@ -134,7 +163,7 @@ class MainWindow(QMainWindow):
         date_row.addStretch()
         options_layout.addLayout(date_row)
 
-        # query
+        # --- Query Input Text Box ---
         query_row: QHBoxLayout = QHBoxLayout()
         query_label: QLabel = QLabel("Query:")
         self.query_input: QLineEdit = QLineEdit()
@@ -146,7 +175,9 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(options_layout)
 
-        # progress bar
+    def _setup_progress_and_buttons(self, main_layout: QVBoxLayout) -> None:
+        """Construct the progress bar and control buttons."""
+        # --- Progress Bar ---
         self.progress_bar: QProgressBar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -154,11 +185,12 @@ class MainWindow(QMainWindow):
         self.progress_bar.setFormat("")
         main_layout.addWidget(self.progress_bar)
 
-        # search and abort buttons
+        # --- Button Layout ---
         button_layout: QHBoxLayout = QHBoxLayout()
         button_layout.addStretch()
 
         self.clear_button: QPushButton = QPushButton("Clear")
+        self.clear_button.setEnabled(False)
         self.clear_button.clicked.connect(self.clear_results)
 
         self.abort_button: QPushButton = QPushButton("Abort")
@@ -169,28 +201,113 @@ class MainWindow(QMainWindow):
         self.search_button.setEnabled(False)
         self.search_button.clicked.connect(self.on_search_clicked)
 
-        self.id_input.textChanged.connect(self._validate_inputs)
-        self.query_input.textChanged.connect(self._validate_inputs)
+        self.id_input.textChanged.connect(self.text_changed)
+        self.query_input.textChanged.connect(self.text_changed)
 
         button_layout.addWidget(self.clear_button)
         button_layout.addWidget(self.abort_button)
         button_layout.addWidget(self.search_button)
         main_layout.addLayout(button_layout)
 
+    def on_export_clicked(self) -> None:
+        """Export the current table results to a CSV file."""
+        row_count: int = self.results_table.rowCount()
+        if row_count == 0:
+            self.progress_bar.setFormat("No results to save.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Results",
+            "search_output.csv",
+            "CSV Files (*.csv)",
+        )
+
+        if not file_path:
+            return
+
+        if not file_path.lower().endswith(".csv"):
+            file_path += ".csv"
+
+        with Path(file_path).open(mode="w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Title", "Channel", "Date", "Time", "URL"])
+
+            for row in range(row_count):
+                title_item: QTableWidgetItem | None = self.results_table.item(row, 0)
+                channel_item: QTableWidgetItem | None = self.results_table.item(row, 1)
+                date_item: QTableWidgetItem | None = self.results_table.item(row, 2)
+                time_item: QTableWidgetItem | None = self.results_table.item(row, 3)
+                snippet_item: QTableWidgetItem | None = self.results_table.item(row, 4)
+
+                title: str = title_item.text() if title_item is not None else ""
+                channel: str = channel_item.text() if channel_item is not None else ""
+                date_str: str = date_item.text() if date_item is not None else ""
+                time_str: str = time_item.text() if time_item is not None else ""
+
+                url: str = ""
+                if snippet_item is not None:
+                    stored_url: str = snippet_item.data(Qt.ItemDataRole.UserRole)
+                    if isinstance(stored_url, str):
+                        url = stored_url
+
+                writer.writerow([title, channel, date_str, time_str, url])
+
+        self.progress_bar.setValue(100)
+        self.progress_bar.setFormat(f"Results saved to {Path(file_path).name}")
+
+    def on_wipe_db_clicked(self) -> None:
+        """Prompt the user and wipe the database if confirmed."""
+        reply: QMessageBox.StandardButton = QMessageBox.question(
+            self,
+            "Wipe Database",
+            "Are you sure you want to delete all downloaded transcripts? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            conn: sqlite3.Connection | None = None
+            try:
+                conn = database.get_connection("transcripts.db")
+                database.clear_database(conn)
+                self.progress_bar.setRange(0, 100)
+                self.progress_bar.setValue(100)
+                self.progress_bar.setFormat("Database wiped successfully.")
+            except Exception as e:
+                self.on_error(f"Failed to wipe database: {e!s}")
+            finally:
+                if conn is not None:
+                    conn.close()
+
+    def on_cell_clicked(self, row: int, column: int) -> None:
+        """Open the hidden URL when the user clicks the snippet cell."""
+        snippet_column = 4
+
+        if column == snippet_column:
+            item: QTableWidgetItem | None = self.results_table.item(row, column)
+            if item is not None:
+                url = item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(url, str) and url:
+                    QDesktopServices.openUrl(url)
+
     def on_source_changed(self, text: str) -> None:
         """Update the Target ID placeholder based on the selected source."""
         if text == "Playlist":
             self.id_input.setPlaceholderText("ex. PLKDZ1ig0uz-U")
         else:
-            self.id_input.setPlaceholderText("ex. @YouTube")
+            self.id_input.setPlaceholderText("ex. @YouTube or UC7_YxT-KID8kRbqZo7MyscQ")
 
     def on_date_mode_toggled(self, checked: bool) -> None:
         """Enable or disable custom date pickers based on radio selection."""
         self.date_from.setEnabled(checked)
         self.date_to.setEnabled(checked)
 
-    def _validate_inputs(self, _: str = "") -> None:
+    def text_changed(self, _: str = "") -> None:
         """Dynamically enable search button only if fields have text."""
+        if self.abort_button.isEnabled():
+            return
+
         has_target: bool = bool(self.id_input.text().strip())
         has_query: bool = bool(self.query_input.text().strip())
         self.search_button.setEnabled(has_target and has_query)
@@ -233,6 +350,7 @@ class MainWindow(QMainWindow):
         self.search_button.setEnabled(False)
         self.abort_button.setEnabled(True)
 
+        self.progress_bar.setStyleSheet("")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("Fetching video metadata...")
@@ -241,8 +359,9 @@ class MainWindow(QMainWindow):
         """Handle worker completion and table population."""
         result_count: int = len(search_results)
 
-        self._validate_inputs()
+        self.clear_button.setEnabled(True)
         self.abort_button.setEnabled(False)
+        self.search_button.setEnabled(True)
         self.progress_bar.setStyleSheet("")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
@@ -252,12 +371,14 @@ class MainWindow(QMainWindow):
             return
 
         self.progress_bar.setFormat(f"Found {result_count} results!")
+        self.results_table.setSortingEnabled(False)
         self.results_table.setRowCount(0)
         self.results_table.setRowCount(result_count)
 
         for row, sr in enumerate(search_results):
             self.results_table.setItem(row, 0, QTableWidgetItem(sr.title))
             self.results_table.setItem(row, 1, QTableWidgetItem(sr.channel))
+            self.results_table.setItem(row, 2, QTableWidgetItem(sr.upload_date))
 
             hours: float
             rem: float
@@ -271,29 +392,30 @@ class MainWindow(QMainWindow):
                 if hours > 0
                 else f"{int(minutes):02d}:{int(seconds):02d}"
             )
-            self.results_table.setItem(row, 2, QTableWidgetItem(time_str))
+            self.results_table.setItem(row, 3, QTableWidgetItem(time_str))
 
             safe_video_id: str = urllib.parse.quote(sr.video_id)
             youtube_url: str = f"https://youtu.be/{safe_video_id}?t={int(sr.start_time)}"
 
-            safe_snippet: str = html.escape(sr.snippet)
-            safe_snippet = safe_snippet.replace("[[[", "<b>").replace("]]]", "</b>")
-            linked_snippet: str = f'<a href="{youtube_url}" style="color: white;">{safe_snippet}</a>'
-            snippet_label: QLabel = QLabel(linked_snippet)
-            snippet_label.setTextFormat(Qt.TextFormat.RichText)
-            snippet_label.setOpenExternalLinks(True)
-            snippet_label.setContentsMargins(4, 2, 4, 2)  # padding
-            self.results_table.setCellWidget(row, 3, snippet_label)
+            snippet_item: QTableWidgetItem = QTableWidgetItem(sr.snippet)
+            snippet_item.setData(Qt.ItemDataRole.UserRole, youtube_url)
+
+            font: QFont = snippet_item.font()
+            font.setUnderline(True)
+            snippet_item.setFont(font)
+
+            self.results_table.setItem(row, 4, snippet_item)
 
         self.results_table.resizeColumnsToContents()
 
         # restrict column widths to prevent massive titles or channel breaking layouts
         self.results_table.setColumnWidth(0, min(self.results_table.columnWidth(0), 200))
         self.results_table.setColumnWidth(1, min(self.results_table.columnWidth(1), 150))
+        self.results_table.setSortingEnabled(True)
 
     def on_error(self, err_msg: str) -> None:
         """Handle worker errors."""
-        self._validate_inputs()
+        self.search_button.setEnabled(True)
         self.abort_button.setEnabled(False)
         self.progress_bar.setStyleSheet(QPROGRESS_ERROR_STYLESHEET)
         self.progress_bar.setRange(0, 100)
@@ -312,7 +434,7 @@ class MainWindow(QMainWindow):
         """Trigger abort state in UI (mock handler)."""
         if getattr(self, "worker", None) is not None:
             self.worker.cancel()
-        self._validate_inputs()
+        self.search_button.setEnabled(True)
         self.abort_button.setEnabled(False)
         self.progress_bar.setStyleSheet("")
         self.progress_bar.setRange(0, 100)
@@ -322,3 +444,4 @@ class MainWindow(QMainWindow):
     def clear_results(self) -> None:
         """Clear all rows from the results table."""
         self.results_table.setRowCount(0)
+        self.clear_button.setEnabled(False)

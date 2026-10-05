@@ -46,6 +46,15 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
 
 
+def clear_database(conn: sqlite3.Connection) -> None:
+    """Wipe all stored videos and transcripts, then recreate empty tables."""
+    with conn:
+        conn.execute("DROP TABLE IF EXISTS transcripts_fts;")
+        conn.execute("DROP TABLE IF EXISTS videos;")
+
+    init_db(conn)
+
+
 def batch_insert_videos(
     conn: sqlite3.Connection,
     metadata_batch: list[VideoMetadata],
@@ -124,7 +133,6 @@ def search_transcripts(
     if not clean_query:
         return []
 
-    # "[[[" and "]]]" are characters to enable escaping html tags later
     sql_list: list[str] = [
         """
         SELECT
@@ -132,7 +140,8 @@ def search_transcripts(
             fts.start_time,
             v.title,
             v.channel,
-            snippet(transcripts_fts, 2, '[[[', ']]]', '...', 15) AS snippet_text,
+            v.upload_date,
+            snippet(transcripts_fts, 2, '', '', '...', 15) AS snippet_text,
             bm25(transcripts_fts) AS rank
         FROM transcripts_fts AS fts
         JOIN videos AS v ON v.video_id = fts.video_id
@@ -140,7 +149,7 @@ def search_transcripts(
         """,
     ]
 
-    params: list[str | int] = [query]
+    params: list[str | int] = [clean_query]
 
     if start_date is not None:
         sql_list.append("AND v.upload_date >= ?")
@@ -162,6 +171,7 @@ def search_transcripts(
             video_id=str(row["video_id"]),
             title=str(row["title"] or "Unknown Title"),
             channel=str(row["channel"] or "Unknown Channel"),
+            upload_date=str(row["upload_date"] or ""),
             start_time=float(row["start_time"]),
             snippet=str(row["snippet_text"]),
             rank=float(row["rank"]),
