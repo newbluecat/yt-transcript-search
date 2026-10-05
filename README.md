@@ -1,6 +1,6 @@
-# YouTube Transcript Explorer
+# YouTube Transcript Search
 
-> [!IMPORTANT] This project is currently incomplete! Do not try to build it.
+> [!WARNING] This project is currently incomplete! Do not try to build it.
 
 A cross-platform desktop application built with Python and PySide6 that searches, extracts, and downloads transcripts and metadata from YouTube channels, playlists, and individual videos. It is designed to be fully portable across Windows, macOS, and Linux by bundling all necessary runtime dependencies, including a localized JavaScript engine.
 
