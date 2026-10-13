@@ -168,12 +168,34 @@ class MainWindow(QMainWindow):
 
         # --- Query Input Text Box ---
         query_row: QHBoxLayout = QHBoxLayout()
+
+        browser_cookies_label: QLabel = QLabel("Browser:")
+        self.browser_combo: QComboBox = QComboBox()
+        browser_mapping: dict[str, str] = {
+            "No Cookies": "none",
+            "Brave": "brave",
+            "Chrome": "chrome",
+            "Chromium": "chromium",
+            "Edge": "edge",
+            "Firefox": "firefox",
+            "Opera": "opera",
+            "Safari": "safari",
+            "Vivaldi": "vivaldi",
+        }
+        for display_name, internal_name in browser_mapping.items():
+            self.browser_combo.addItem(display_name, internal_name)
+
         query_label: QLabel = QLabel("Query:")
+
         self.query_input: QLineEdit = QLineEdit()
         self.query_input.setPlaceholderText("Search terms...")
         self.query_input.setMaxLength(MAX_QUERY_LENGTH)
+
+        query_row.addWidget(browser_cookies_label)
+        query_row.addWidget(self.browser_combo)
         query_row.addWidget(query_label)
         query_row.addWidget(self.query_input)
+
         options_layout.addLayout(query_row)
 
         main_layout.addLayout(options_layout)
@@ -325,7 +347,24 @@ class MainWindow(QMainWindow):
 
     def on_search_clicked(self) -> None:
         """Trigger search state and start the background worker."""
+        if self.browser_combo.currentData() == "none":
+            reply: QMessageBox.StandardButton = QMessageBox.warning(
+                self,
+                "No Cookies Selected",
+                (
+                    "Without cookies, the application cannot bypass 18+ "
+                    "age restrictions or access private content.\n\n"
+                    "Do you want to continue without cookies?"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            if reply == QMessageBox.StandardButton.No:
+                return
+
         source_type: str = self.source_combo.currentText()
+        browser: str = self.browser_combo.currentData()
         target_id: str = self.id_input.text().strip()
         query: str = self.query_input.text().strip()
 
@@ -344,6 +383,7 @@ class MainWindow(QMainWindow):
             query=query,
             start_date=start_date,
             end_date=end_date,
+            browser=browser,
             limit=100,
         )
 

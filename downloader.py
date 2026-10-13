@@ -102,7 +102,12 @@ def _build_url(identifier: str, source_type: str) -> str:
     raise UnknownSourceError
 
 
-def _get_video_count(url: str, start_date: dt.date | None = None, end_date: dt.date | None = None) -> list[str]:
+def _get_video_count(
+    url: str,
+    browser: str,
+    start_date: dt.date | None = None,
+    end_date: dt.date | None = None,
+) -> list[str]:
     """Get number of videos from URL with a single yt-dlp request."""
     yt_dlp_metadata_opts: dict[str, object] = {
         "quiet": True,
@@ -117,6 +122,9 @@ def _get_video_count(url: str, start_date: dt.date | None = None, end_date: dt.d
         yt_dlp_metadata_opts["js_runtimes"] = {"quickjs": {"path": quickjs_path}}
     else:
         logger.warning("QuickJS binary not found in expected location.")
+
+    if browser != "none":
+        yt_dlp_metadata_opts["cookiesfrombrowser"] = (browser, None, None, None)
 
     if start_date is not None:
         yt_dlp_metadata_opts["dateafter"] = start_date.strftime("%Y%m%d")
@@ -153,6 +161,7 @@ def _get_video_count(url: str, start_date: dt.date | None = None, end_date: dt.d
 
 def _get_transcripts(
     video_ids: list[str],
+    browser: str,
     on_callback: Callable[[], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     max_retries_per_video: int = 3,
@@ -175,6 +184,9 @@ def _get_transcripts(
         yt_dlp_transcripts_opts["js_runtimes"] = {"quickjs": {"path": quickjs_path}}
     else:
         logger.warning("QuickJS binary not found in expected location.")
+
+    if browser != "none":
+        yt_dlp_transcripts_opts["cookiesfrombrowser"] = (browser, None, None, None)
 
     with yt_dlp.YoutubeDL(yt_dlp_transcripts_opts) as ydl:
         for vid in video_ids:
@@ -523,6 +535,7 @@ def _process_batches(  # noqa: C901, PLR0913, PLR0917
     missing_ids: list[str],
     batch_size: int,
     skipped_count: int,
+    browser: str,
     progress_callback: Callable[[int, int, str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> None:
@@ -554,6 +567,7 @@ def _process_batches(  # noqa: C901, PLR0913, PLR0917
 
         batch_transcript_results: list[TranscriptResult] = _get_transcripts(
             video_ids=batch_ids,
+            browser=browser,
             on_callback=_on_transcript_done,
             is_cancelled=is_cancelled,
         )
@@ -606,6 +620,7 @@ def process_target(
 
     video_ids: list[str] = _get_video_count(
         url=url,
+        browser=search_params.browser,
         start_date=search_params.start_date,
         end_date=search_params.end_date,
     )
@@ -635,6 +650,7 @@ def process_target(
         missing_ids=missing_ids,
         batch_size=batch_size,
         skipped_count=skipped_count,
+        browser=search_params.browser,
         progress_callback=progress_callback,
         is_cancelled=is_cancelled,
     )

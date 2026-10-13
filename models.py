@@ -40,6 +40,7 @@ class SearchParams(NamedTuple):
     query: str
     start_date: date | None
     end_date: date | None
+    browser: str
     limit: int = 100
 
 

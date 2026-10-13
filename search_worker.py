@@ -31,7 +31,7 @@ class SearchWorker(QThread):
         """Initialize the search work with db and basic query info."""
         super().__init__(parent)
         self.db_path: str = db_path
-        self.search: SearchParams = search
+        self.params: SearchParams = search
         self._is_cancelled: bool = False
 
     def cancel(self) -> None:
@@ -50,7 +50,7 @@ class SearchWorker(QThread):
 
                 downloader.process_target(
                     conn=conn,
-                    search_params=self.search,
+                    search_params=self.params,
                     progress_callback=self.progress.emit,
                     is_cancelled=lambda: self._is_cancelled,
                 )
@@ -58,29 +58,29 @@ class SearchWorker(QThread):
                 if self._is_cancelled:
                     return
 
-                if self.search.query:
+                if self.params.query:
                     self.progress.emit(100, 100, "Querying database...")
                     results: list[SearchResult] = database.search_transcripts(
                         conn=conn,
-                        query=self.search.query,
-                        start_date=self.search.start_date,
-                        end_date=self.search.end_date,
-                        limit=self.search.limit,
+                        query=self.params.query,
+                        start_date=self.params.start_date,
+                        end_date=self.params.end_date,
+                        limit=self.params.limit,
                     )
                     self.results_found.emit(results)
 
         except Exception as e:
-            logger.exception("SearchWorker failed for %s '%s'", self.search.source_type, self.search.target_id)
+            logger.exception("SearchWorker failed for %s '%s'", self.params.source_type, self.params.target_id)
             raw_msg: str = str(e)
 
             if "400" in raw_msg:
                 parsed_msg: str = (
-                    f"Invalid {self.search.source_type} ID: Please make sure that the ID is spelled correctly."
+                    f"Invalid {self.params.source_type} ID: Please make sure that the ID is spelled correctly."
                 )
             elif "404" in raw_msg:
-                parsed_msg = f"{self.search.source_type} not found. It may be private or deleted."
+                parsed_msg = f"{self.params.source_type} not found. It may be private or deleted."
             elif "not exist" in raw_msg or "unavailable" in raw_msg:
-                parsed_msg = f"{self.search.source_type} is unavailable or does not exist."
+                parsed_msg = f"{self.params.source_type} is unavailable or does not exist."
             else:
                 # fallback: strip ANSI codes and print the raw string
                 ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
