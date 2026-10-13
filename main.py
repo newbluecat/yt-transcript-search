@@ -7,7 +7,7 @@ from main_window import MainWindow
 
 if __name__ == "__main__":
     logging.basicConfig(
-        filename="errors.log",
+        filename="error.log",
         level=logging.INFO,
         format="[%(asctime)s] [%(levelname)s] [%(module)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",

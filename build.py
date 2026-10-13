@@ -36,22 +36,27 @@ def build_app() -> None:
     separator: str = ";" if is_windows else ":"
     add_data_arg: str = f"{bin_path}{separator}."
 
-    PyInstaller.__main__.run(
-        [
-            "main.py",
-            "--noconsole",
-            "--onedir",
-            f"--add-data={add_data_arg}",
-            "--collect-data=yt_dlp",
-            "--collect-data=yt_dlp_ejs",
-            "--exclude-module=tkinter",
-            "--exclude-module=unittest",
-            "--exclude-module=PySide6.QtWebEngineCore",
-            "--exclude-module=PySide6.QtWebEngineWidgets",
-            "--exclude-module=PySide6.QtNetwork",
-            "--exclude-module=PySide6.QtQml",
-        ],
-    )
+    pyinstaller_args: list[str] = [
+        "main.py",
+        "--noconsole",
+        "--onedir",
+        f"--add-data={add_data_arg}",
+        f"--add-data=LICENSE.txt{separator}.",
+        f"--add-data=THIRD-PARTY-NOTICES.txt{separator}.",
+        "--copy-metadata=PySide6",
+        "--copy-metadata=yt_dlp",
+        "--copy-metadata=requests",
+        "--collect-data=yt_dlp",
+        "--collect-data=yt_dlp_ejs",
+        "--exclude-module=tkinter",
+        "--exclude-module=unittest",
+        "--exclude-module=PySide6.QtWebEngineCore",
+        "--exclude-module=PySide6.QtWebEngineWidgets",
+        "--exclude-module=PySide6.QtNetwork",
+        "--exclude-module=PySide6.QtQml",
+    ]
+
+    PyInstaller.__main__.run(pyinstaller_args)
 
 
 if __name__ == "__main__":
