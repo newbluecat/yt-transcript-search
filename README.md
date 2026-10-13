@@ -24,9 +24,10 @@ A cross-platform desktop application built with Python and PySide6 that searches
 
 This project uses PyInstaller for packaging. To comply with the PySide6 LGPLv3 license, the application must be built using `--onedir` mode rather than `--onefile`. This ensures users can replace the shared Qt libraries if they choose.
 
-Run the build script:
+Run either build script:
 
-`python build.py`
+`python pyinstaller_build.py`
+`python nuitka_build.py`
 
 This script automatically:
 
