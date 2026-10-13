@@ -36,3 +36,9 @@ This script automatically:
 - Bundles the correct QuickJS executable from the `bin/` directory.
 - Copies necessary MIT and LGPLv3 license text files to the distribution directory.
 - Sets up the localized `_MEIPASS` hooks for runtime data extraction.
+
+## Licensing
+
+This project is licensed with the MIT License, placed in LICENSE.txt.
+
+All relevant licenses/copyright notices are placed in the THIRD-PARTY-NOTICES.txt file.
