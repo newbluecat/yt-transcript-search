@@ -31,8 +31,7 @@ def build_app() -> None:
     bin_path: Path = Path("bin") / os_dir / arch_dir / exe_name
 
     if not bin_path.exists():
-        print(f"Missing binary: {bin_path}")
-        sys.exit(1)
+        sys.exit(f"Missing binary: {bin_path}")
 
     separator: str = ";" if is_windows else ":"
     add_data_arg: str = f"{bin_path}{separator}."

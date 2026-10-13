@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,8 @@ if TYPE_CHECKING:
     import sqlite3
 
     from models import SearchParams, SearchResult
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class SearchWorker(QThread):
@@ -67,6 +70,7 @@ class SearchWorker(QThread):
                     self.results_found.emit(results)
 
         except Exception as e:
+            logger.exception("SearchWorker failed for %s '%s'", self.search.source_type, self.search.target_id)
             raw_msg: str = str(e)
 
             if "400" in raw_msg:

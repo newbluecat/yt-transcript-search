@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Final
 from models import SearchResult, TranscriptSnippet, VideoMetadata
 
 if TYPE_CHECKING:
-    import datetime
+    import datetime as dt
 
 DB_PATH: Final[str] = "transcripts.db"
 
@@ -123,13 +123,15 @@ def search_transcripts(
     conn: sqlite3.Connection,
     query: str,
     limit: int = 100,
-    start_date: datetime.date | None = None,
-    end_date: datetime.date | None = None,
+    start_date: dt.date | None = None,
+    end_date: dt.date | None = None,
 ) -> list[SearchResult]:
     """Search using FTS5 MATCH, returning BM25 rank and highlighted snippets."""
     clean_query: str = query.strip()
 
     # since empty queries are invalid for FTS5
+    # this should never happen, but this is here as
+    # a last resort
     if not clean_query:
         return []
 
@@ -193,8 +195,8 @@ def get_existing_video_ids(conn: sqlite3.Connection, video_ids: list[str]) -> se
     sql: str = f"""
         SELECT video_id
         FROM videos
-        WHERE status = 'SUCCESS' AND video_id IN ({placeholders});
-    """
+        WHERE status IN ('SUCCESS', 'UNAVAILABLE', 'NO_CAPTIONS') AND video_id IN ({placeholders});
+    """  # noqa: S608
 
     cursor: sqlite3.Cursor = conn.execute(sql, video_ids)
     return {str(row["video_id"]) for row in cursor.fetchall()}

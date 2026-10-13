@@ -3,8 +3,6 @@ from typing import TYPE_CHECKING, NamedTuple
 if TYPE_CHECKING:
     from datetime import date
 
-    from youtube_transcript_api import FetchedTranscript
-
 
 class VideoMetadata(NamedTuple):
     """Contains all relevant video metadata."""
@@ -21,8 +19,9 @@ class TranscriptResult(NamedTuple):
     """Contains the output of youtube_transcript_api.fetch()."""
 
     video_id: str
-    transcript: FetchedTranscript | None
+    transcript: list[dict[str, str | float]] | None
     status: str
+    metadata: VideoMetadata | None = None
 
 
 class TranscriptSnippet(NamedTuple):

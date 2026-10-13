@@ -1,5 +1,6 @@
 import csv
-import datetime
+import datetime as dt
+import logging
 import urllib.parse
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -52,6 +53,8 @@ QPROGRESS_ERROR_STYLESHEET = """
         border-radius: 3px; /* Slightly smaller than container to look clean */
 }
 """
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -229,32 +232,37 @@ class MainWindow(QMainWindow):
         if not file_path.lower().endswith(".csv"):
             file_path += ".csv"
 
-        with Path(file_path).open(mode="w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["Title", "Channel", "Date", "Time", "URL"])
+        try:
+            with Path(file_path).open(mode="w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Title", "Channel", "Date", "Time", "URL"])
 
-            for row in range(row_count):
-                title_item: QTableWidgetItem | None = self.results_table.item(row, 0)
-                channel_item: QTableWidgetItem | None = self.results_table.item(row, 1)
-                date_item: QTableWidgetItem | None = self.results_table.item(row, 2)
-                time_item: QTableWidgetItem | None = self.results_table.item(row, 3)
-                snippet_item: QTableWidgetItem | None = self.results_table.item(row, 4)
+                for row in range(row_count):
+                    title_item: QTableWidgetItem | None = self.results_table.item(row, 0)
+                    channel_item: QTableWidgetItem | None = self.results_table.item(row, 1)
+                    date_item: QTableWidgetItem | None = self.results_table.item(row, 2)
+                    time_item: QTableWidgetItem | None = self.results_table.item(row, 3)
+                    snippet_item: QTableWidgetItem | None = self.results_table.item(row, 4)
 
-                title: str = title_item.text() if title_item is not None else ""
-                channel: str = channel_item.text() if channel_item is not None else ""
-                date_str: str = date_item.text() if date_item is not None else ""
-                time_str: str = time_item.text() if time_item is not None else ""
+                    title: str = title_item.text() if title_item is not None else ""
+                    channel: str = channel_item.text() if channel_item is not None else ""
+                    date_str: str = date_item.text() if date_item is not None else ""
+                    time_str: str = time_item.text() if time_item is not None else ""
 
-                url: str = ""
-                if snippet_item is not None:
-                    stored_url: str = snippet_item.data(Qt.ItemDataRole.UserRole)
-                    if isinstance(stored_url, str):
-                        url = stored_url
+                    url: str = ""
+                    if snippet_item is not None:
+                        stored_url: str = snippet_item.data(Qt.ItemDataRole.UserRole)
+                        if isinstance(stored_url, str):
+                            url = stored_url
 
-                writer.writerow([title, channel, date_str, time_str, url])
+                    writer.writerow([title, channel, date_str, time_str, url])
 
-        self.progress_bar.setValue(100)
-        self.progress_bar.setFormat(f"Results saved to {Path(file_path).name}")
+            self.progress_bar.setValue(100)
+            self.progress_bar.setFormat(f"Results saved to {Path(file_path).name}")
+
+        except Exception as e:
+            logger.exception("Failed to export CSV to %s", file_path)
+            self.on_error(f"Export failed: {e!s}")
 
     def on_wipe_db_clicked(self) -> None:
         """Prompt the user and wipe the database if confirmed."""
@@ -274,8 +282,11 @@ class MainWindow(QMainWindow):
                 self.progress_bar.setRange(0, 100)
                 self.progress_bar.setValue(100)
                 self.progress_bar.setFormat("Database wiped successfully")
+
             except Exception as e:
+                logger.exception("Failed to clear database.")
                 self.on_error(f"Failed to wipe database: {e!s}")
+
             finally:
                 if conn is not None:
                     conn.close()
@@ -298,7 +309,7 @@ class MainWindow(QMainWindow):
         else:
             self.id_input.setPlaceholderText("ex. @YouTube or UC7_YxT-KID8kRbqZo7MyscQ")
 
-    def on_date_mode_toggled(self, checked: bool) -> None:
+    def on_date_mode_toggled(self, checked: bool) -> None:  # noqa: FBT001
         """Enable or disable custom date pickers based on radio selection."""
         self.date_from.setEnabled(checked)
         self.date_to.setEnabled(checked)
@@ -318,14 +329,14 @@ class MainWindow(QMainWindow):
         target_id: str = self.id_input.text().strip()
         query: str = self.query_input.text().strip()
 
-        start_date: datetime.date | None = None
-        end_date: datetime.date | None = None
+        start_date: dt.date | None = None
+        end_date: dt.date | None = None
 
         if self.date_custom_radio.isChecked():
             q_start: QDate = self.date_from.date()
             q_end: QDate = self.date_to.date()
-            start_date = datetime.date(q_start.year(), q_start.month(), q_start.day())
-            end_date = datetime.date(q_end.year(), q_end.month(), q_end.day())
+            start_date = dt.date(q_start.year(), q_start.month(), q_start.day())
+            end_date = dt.date(q_end.year(), q_end.month(), q_end.day())
 
         search_params: SearchParams = SearchParams(
             source_type=source_type,

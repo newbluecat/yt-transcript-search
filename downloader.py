@@ -1,24 +1,18 @@
 from __future__ import annotations
 
-import concurrent.futures
-import datetime
+import contextlib
+import datetime as dt
+import logging
 import os
 import platform
 import random
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING
 
+import requests
 import yt_dlp
-from youtube_transcript_api import (
-    CouldNotRetrieveTranscript,
-    FetchedTranscript,
-    NoTranscriptFound,
-    TranscriptsDisabled,
-    VideoUnavailable,
-    YouTubeTranscriptApi,
-)
 
 import database
 from models import SearchParams, TranscriptResult, TranscriptSnippet, VideoMetadata
@@ -27,13 +21,39 @@ if TYPE_CHECKING:
     import sqlite3
     from collections.abc import Callable
 
+logger: logging.Logger = logging.getLogger(__name__)
+
+
+class JSONDownloadError(ConnectionError):
+    """Raised when the json transcript payload fails to download."""
+
+    def __init__(self) -> None:
+        """Initialize JSONDownLoadError."""
+        super().__init__("Failed to download json transcript")
+
+
+class UnknownSourceError(ValueError):
+    """Raised when an unrecognized source type is parsed."""
+
+    def __init__(self) -> None:
+        """Initialize UnknownSourceError."""
+        super().__init__("Unknown error occurred.")
+
+
+class IPBlockedError(ConnectionError):
+    """Raised when YouTube rate-limits or blocks the IP."""
+
+    def __init__(self) -> None:
+        """Initialize IPBlockedError."""
+        super().__init__("YouTube has temporarily blocked your IP address due to too many requests.")
+
 
 def _get_quickjs_path() -> str | None:
     is_windows: bool = os.name == "nt"
     exe_name: str = "quickjs.exe" if is_windows else "quickjs"
 
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        qjs_exe: Path = Path(sys._MEIPASS) / exe_name
+        qjs_exe: Path = Path(sys._MEIPASS) / exe_name  # noqa: SLF001
     else:
         if is_windows:
             os_dir: str = "win"
@@ -59,19 +79,6 @@ def _get_quickjs_path() -> str | None:
     return None
 
 
-YT_DLP_OPTS: Final[dict[str, Any]] = {
-    "quiet": True,
-    "extract_flat": True,
-    "skip_download": True,
-    "playlistend": 10000,
-    "extractor_args": {"youtubetab": ["approximate_date"]},
-}
-
-_quickjs_path: str | None = _get_quickjs_path()
-if _quickjs_path is not None:
-    YT_DLP_OPTS["js_runtimes"] = [_quickjs_path]
-
-
 def _build_url(identifier: str, source_type: str) -> str:
     """Construct a valid YouTube url given the ID and the source type."""
     clean_id: str = identifier.strip()
@@ -92,71 +99,56 @@ def _build_url(identifier: str, source_type: str) -> str:
     if source_type == "Channel (Shorts)":
         return f"{base_url}/shorts"
 
-    raise ValueError("Unknown error occurred.")
+    raise UnknownSourceError
 
 
-def _get_records(url: str, start_date: datetime.date | None = None) -> list[VideoMetadata]:
-    """Scrape video metadata from URL with a single yt-dlp request."""
-    opts: dict[str, Any] = YT_DLP_OPTS.copy()
+def _get_video_count(url: str, start_date: dt.date | None = None, end_date: dt.date | None = None) -> list[str]:
+    """Get number of videos from URL with a single yt-dlp request."""
+    yt_dlp_metadata_opts: dict[str, object] = {
+        "quiet": True,
+        "extract_flat": True,
+        "skip_download": True,
+        "playlistend": 10000,
+        "extractor_args": {"youtubetab": ["approximate_date"]},
+    }
+
+    quickjs_path: str | None = _get_quickjs_path()
+    if quickjs_path is not None:
+        yt_dlp_metadata_opts["js_runtimes"] = {"quickjs": {"path": quickjs_path}}
+    else:
+        logger.warning("QuickJS binary not found in expected location.")
 
     if start_date is not None:
-        opts["dateafter"] = start_date.strftime("%Y%m%d")
+        yt_dlp_metadata_opts["dateafter"] = start_date.strftime("%Y%m%d")
 
-    records: list[VideoMetadata] = []
+    if end_date is not None:
+        yt_dlp_metadata_opts["datebefore"] = end_date.strftime("%Y%m%d")
 
-    # if playlist doesn't exist, let process_target handle it
-    with yt_dlp.YoutubeDL(YT_DLP_OPTS) as ydl:
-        info: dict[str, Any] | None = ydl.extract_info(url, download=False)
+    video_ids: list[str] = []
+
+    with yt_dlp.YoutubeDL(yt_dlp_metadata_opts) as ydl:
+        info: dict[str, object] | None = ydl.extract_info(url, download=False)
 
     if info is None:
-        return records
+        logger.warning("yt-dlp failed to extract metadata for URL: %s", url)
+        return video_ids
 
     try:
-        entries: list[dict[str, Any]] = info["entries"]
+        entries: list[dict[str, object]] = info["entries"]
+        logger.info("Found %d videos in the target URL matching date criteria.", len(entries))
     except KeyError:
-        return records
+        logger.warning("No 'entries' key found in yt-dlp metadata for %s", url)
+        return video_ids
 
     for entry in entries:
-        parsed: VideoMetadata | None = _get_single_record(entry)
-        if parsed is not None:
-            records.append(parsed)
+        try:
+            video_id: str | None = str(entry.get("id")) if entry.get("id") else None
+            if video_id is not None:
+                video_ids.append(video_id)
+        except AttributeError:
+            continue
 
-    return records
-
-
-def _get_single_record(entry: dict[str, Any]) -> VideoMetadata | None:
-    """Extract a VideoMetadata tuple from dict of yt-dlp entries."""
-    try:
-        video_id: str | None = entry.get("id")
-    except AttributeError:
-        return None
-
-    if video_id is None:
-        return None
-
-    try:
-        raw_date: str = entry["upload_date"]
-        formatted_date: datetime.date | None = datetime.date(
-            int(raw_date[:4]),
-            int(raw_date[4:6]),
-            int(raw_date[6:8]),
-        )
-    except KeyError, TypeError, ValueError, IndexError:
-        formatted_date = None
-
-    try:
-        duration: int | None = int(entry["duration"])
-    except KeyError, TypeError, ValueError:
-        duration = None
-
-    return VideoMetadata(
-        video_id=video_id,
-        title=entry.get("title"),
-        channel=entry.get("channel") or entry.get("uploader"),
-        channel_id=entry.get("channel_id") or entry.get("uploader_id"),
-        upload_date=formatted_date,
-        duration_seconds=duration,
-    )
+    return video_ids
 
 
 def _get_transcripts(
@@ -164,39 +156,42 @@ def _get_transcripts(
     on_callback: Callable[[], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     max_retries_per_video: int = 3,
-    max_workers: int = 3,
 ) -> list[TranscriptResult]:
-    """Fetch transcripts for a batch of video IDs concurrently using threads."""
-    ytt_api: YouTubeTranscriptApi = YouTubeTranscriptApi()
+    """Fetch transcripts and metadata for a batch of video IDs."""
     results: list[TranscriptResult] = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures: list[concurrent.futures.Future[TranscriptResult]] = [
-            executor.submit(
-                _get_single_transcript,
-                video_id=video_id,
-                ytt_api=ytt_api,
-                max_retries=max_retries_per_video,
-            )
-            for video_id in video_ids
-        ]
+    yt_dlp_transcripts_opts: dict[str, object] = {
+        "quiet": True,
+        "skip_download": True,
+        "writesubtitles": True,
+        "writeautomaticsub": True,
+        "subtitleslangs": ["en", "en.*"],
+        "subtitlesformat": "json3",
+        "cookiesfrombrowser": ("firefox",),
+    }
 
-        for future in concurrent.futures.as_completed(futures):
+    quickjs_path: str | None = _get_quickjs_path()
+    if quickjs_path is not None:
+        yt_dlp_transcripts_opts["js_runtimes"] = {"quickjs": {"path": quickjs_path}}
+    else:
+        logger.warning("QuickJS binary not found in expected location.")
+
+    with yt_dlp.YoutubeDL(yt_dlp_transcripts_opts) as ydl:
+        for vid in video_ids:
             if is_cancelled is not None and is_cancelled():
-                for f in futures:
-                    f.cancel()
+                logger.info("Transcript extraction cancelled by user.")
                 break
 
-            result: TranscriptResult | None = future.result()
-            if result is not None:
-                if result.status == "IP_BLOCKED":
-                    for f in futures:
-                        f.cancel()
-                    raise ConnectionError(
-                        "YouTube has temporarily blocked your IP address due to too many requests.",
-                    )
-
+            try:
+                result: TranscriptResult = _get_single_transcript(
+                    video_id=vid,
+                    ydl=ydl,
+                    max_retries=max_retries_per_video,
+                )
                 results.append(result)
+            except Exception:
+                logger.exception("Unhandled error for video %s", vid)
+                results.append(TranscriptResult(video_id=vid, transcript=None, status="ERROR", metadata=None))
 
             if on_callback is not None:
                 on_callback()
@@ -204,68 +199,201 @@ def _get_transcripts(
     return results
 
 
-def _get_single_transcript(
+def _extract_json_url(info: dict[str, object]) -> str | None:
+    """Extract the json3 format URL for English subtitles from yt-dlp metadata."""
+    subs: dict[str, object] | None = info.get("subtitles")
+    auto_subs: dict[str, object] | None = info.get("automatic_captions")
+
+    def _find_en_track(sub_dict: dict[str, object] | None) -> list[dict[str, object]] | None:
+        if not sub_dict:
+            return None
+
+        if "en" in sub_dict:
+            return sub_dict["en"]
+
+        for lang, track in sub_dict.items():
+            if lang.startswith("en"):
+                return track
+
+        return None
+
+    target_subs: list[dict[str, object]] | None = _find_en_track(subs)
+
+    if target_subs is None:
+        target_subs = _find_en_track(auto_subs)
+
+    if target_subs is None:
+        avail_subs: list[str] = list((subs or {}).keys())
+        avail_auto: list[str] = list((auto_subs or {}).keys())
+        logger.warning(
+            "No English tracks found. Available manual: %s | Available auto: %s",
+            avail_subs,
+            avail_auto,
+        )
+        return None
+
+    for sub_format in target_subs:
+        if sub_format.get("ext") == "json3":
+            url_val: object = sub_format.get("url")
+            if url_val is not None:
+                return str(url_val)
+
+    return None
+
+
+def _fetch_and_parse_json(json_url: str) -> list[dict[str, str | float]] | None:
+    """Download and parse YouTube's native json subtitle format into a uniform list."""
+    try:
+        response: requests.Response = requests.get(json_url, timeout=15)
+    except requests.RequestException as e:
+        logger.exception("Network error requesting json3")
+        raise JSONDownloadError from e
+
+    if response.status_code != requests.codes.ok:
+        logger.error("HTTP %s returned for json3 URL: %s", response.status_code, json_url)
+        raise JSONDownloadError
+
+    raw_json: dict[str, object] = response.json()
+    events: list[dict[str, object]] | None = raw_json.get("events")
+
+    if events is None:
+        return None
+
+    parsed_transcript: list[dict[str, str | float]] = []
+
+    for event in events:
+        segs: list[dict[str, object]] | None = event.get("segs")
+        if segs is None:
+            continue
+
+        text: str = "".join([str(seg.get("utf8", "")) for seg in segs]).strip()
+        if text:
+            parsed_transcript.append(
+                {"text": text, "start": float(str(event.get("tStartMs", 0))) / 1000.0},
+            )
+
+    return parsed_transcript
+
+
+def _get_single_transcript(  # noqa: C901, PLR0912
     video_id: str,
-    ytt_api: YouTubeTranscriptApi,
+    ydl: yt_dlp.YoutubeDL,
     max_retries: int = 3,
 ) -> TranscriptResult:
     """Fetch one transcript with exponentially increasing delays for rate limits."""
+    video_url: str = f"https://www.youtube.com/watch?v={video_id}"
+
     for attempt in range(max_retries):
         try:
             if attempt > 0:
-                time.sleep(random.uniform(0.3, 0.8))
+                time.sleep(random.uniform(1.0, 2.5))
 
-            transcript: FetchedTranscript = ytt_api.fetch(video_id)
-            return TranscriptResult(
+            info: dict[str, object] | None = ydl.extract_info(video_url, download=False)
+
+            if info is None:
+                logger.warning("No info extracted for video %s (UNAVAILABLE)", video_id)
+                return TranscriptResult(video_id=video_id, transcript=None, status="UNAVAILABLE", metadata=None)
+
+            # --- getting metadata ---
+            exact_date: dt.date | None = None
+            timestamp: object = info.get("timestamp") or info.get("release_timestamp")
+            if timestamp is not None:
+                try:
+                    exact_date = (
+                        dt.datetime.fromtimestamp(
+                            int(str(timestamp)),
+                            tz=dt.UTC,
+                        )
+                        .astimezone()
+                        .date()
+                    )
+                except TypeError, ValueError:
+                    logger.warning(
+                        "Video %s has no UNIX upload date, falling back to basic timestamp reading",
+                        video_id,
+                    )
+
+            if exact_date is None:
+                raw_date_val: object = info.get("upload_date") or info.get("release_date")
+                if raw_date_val is not None:
+                    raw_date_str: str = str(raw_date_val).replace("-", "")
+                    if len(raw_date_str) >= 8:  # noqa: PLR2004
+                        with contextlib.suppress(ValueError):
+                            exact_date = dt.date(
+                                int(raw_date_str[:4]),
+                                int(raw_date_str[4:6]),
+                                int(raw_date_str[6:8]),
+                            )
+
+            try:
+                dur_val: object = info.get("duration", 0)
+                duration: int | None = int(str(dur_val)) if dur_val else None
+            except TypeError, ValueError:
+                duration = None
+
+            title_val: object = info.get("title")
+            channel_val: object = info.get("channel") or info.get("uploader")
+            channel_id_val: object = info.get("channel_id") or info.get("uploader_id")
+
+            full_metadata = VideoMetadata(
                 video_id=video_id,
-                transcript=transcript,
-                status="SUCCESS",
+                title=str(title_val) if title_val else None,
+                channel=str(channel_val) if channel_val else None,
+                channel_id=str(channel_id_val) if channel_id_val else None,
+                upload_date=exact_date,
+                duration_seconds=duration,
             )
+            # ---------------------------------------
 
-        except VideoUnavailable, TranscriptsDisabled:
-            return TranscriptResult(
-                video_id=video_id,
-                transcript=None,
-                status="UNAVAILABLE",
-            )
-
-        except NoTranscriptFound:
-            return TranscriptResult(
-                video_id=video_id,
-                transcript=None,
-                status="RETRYABLE",
-            )
-        except CouldNotRetrieveTranscript as e:
-            if "IP" in str(e):
-                return TranscriptResult(video_id, None, "IP_BLOCKED")
-            return TranscriptResult(video_id, None, "RETRYABLE")
-
-        except Exception:
-            # print(str(e))
-            if attempt == max_retries - 1:
+            json_url: str | None = _extract_json_url(info)
+            if json_url is None:
+                logger.warning("No English json3 subtitle track found for %s (NO_CAPTIONS)", video_id)
                 return TranscriptResult(
                     video_id=video_id,
                     transcript=None,
-                    status="RETRYABLE",
+                    status="NO_CAPTIONS",
+                    metadata=full_metadata,
                 )
 
-            sleep_time: float = (2**attempt) + random.uniform(0.5, 1.5)
-            time.sleep(sleep_time)
+            parsed_transcript: list[dict[str, str | float]] | None = _fetch_and_parse_json(json_url)
+            if parsed_transcript is None:
+                return TranscriptResult(
+                    video_id=video_id,
+                    transcript=None,
+                    status="NO_CAPTIONS",
+                    metadata=full_metadata,
+                )
 
-    return TranscriptResult(
-        video_id=video_id,
-        transcript=None,
-        status="RETRYABLE",
-    )
+            time.sleep(random.uniform(1.5, 3.0))
+            return TranscriptResult(
+                video_id=video_id,
+                transcript=parsed_transcript,
+                status="SUCCESS",
+                metadata=full_metadata,
+            )
+
+        except yt_dlp.utils.YoutubeDLError as e:
+            err_str: str = str(e).lower()
+            if "bot" in err_str or "429" in err_str or "sign in" in err_str:
+                logger.warning("Rate limited or IP blocked on video %s: %s", video_id, e)
+                return TranscriptResult(video_id=video_id, transcript=None, status="IP_BLOCKED", metadata=None)
+            logger.exception("yt-dlp error on video %s", video_id)
+
+        except Exception:
+            logger.exception("Unexpected error fetching transcript for %s", video_id)
+
+        time.sleep((2**attempt) + random.uniform(0.5, 1.5))
+
+    return TranscriptResult(video_id=video_id, transcript=None, status="RETRYABLE", metadata=None)
 
 
 def _build_atomic_blocks(
-    raw_segments: list[dict[str, Any]],
+    raw_segments: list[dict[str, str | float]],
     overlap_seconds: float,
-) -> list[list[dict[str, Any]]]:
+) -> list[list[dict[str, str | float]]]:
     """Group raw segments into discrete atomic time blocks."""
-    blocks: list[list[dict[str, Any]]] = []
-    current_block: list[dict[str, Any]] = []
+    blocks: list[list[dict[str, str | float]]] = []
+    current_block: list[dict[str, str | float]] = []
     block_start: float = float(raw_segments[0].get("start", 0.0))
 
     for seg in raw_segments:
@@ -286,7 +414,7 @@ def _build_atomic_blocks(
 
 
 def _build_sliding_chunks(
-    blocks: list[list[dict[str, Any]]],
+    blocks: list[list[dict[str, str | float]]],
     video_id: str,
     window_seconds: float,
     overlap_seconds: float,
@@ -297,7 +425,7 @@ def _build_sliding_chunks(
     chunks: list[TranscriptSnippet] = []
 
     for i in range(0, len(blocks), stride):
-        window_blocks: list[list[dict[str, Any]]] = blocks[i : i + blocks_per_window]
+        window_blocks: list[list[dict[str, str | float]]] = blocks[i : i + blocks_per_window]
 
         # at the end, if only one block left,
         # adds the previous block to it to make it longer
@@ -334,11 +462,11 @@ def _chunk_transcript_sliding(
     if result.transcript is None:
         return []
 
-    raw_segments: list[dict[str, Any]] = result.transcript.to_raw_data()
+    raw_segments: list[dict[str, str | float]] = result.transcript
     if not raw_segments:
         return []
 
-    blocks: list[list[dict[str, Any]]] = _build_atomic_blocks(raw_segments, overlap_seconds)
+    blocks: list[list[dict[str, str | float]]] = _build_atomic_blocks(raw_segments, overlap_seconds)
 
     return _build_sliding_chunks(
         blocks=blocks,
@@ -373,45 +501,33 @@ def _prepare_batch_data(
     return status_map, chunks
 
 
-def _filter_metadata(
+def _filter_videos(
     conn: sqlite3.Connection,
-    metadata: list[VideoMetadata],
-    start_date: datetime.date | None,
-    end_date: datetime.date | None,
-) -> tuple[list[VideoMetadata], int, int]:
-    """Filter metadata by date and database existence, returning missing videos and counts."""
-    filtered_metadata: list[VideoMetadata] = []
-    for meta in metadata:
-        if start_date is not None and meta.upload_date is not None and meta.upload_date < start_date:
-            continue
-        if end_date is not None and meta.upload_date is not None and meta.upload_date > end_date:
-            continue
-        filtered_metadata.append(meta)
+    video_ids: list[str],
+) -> tuple[list[str], int, int]:
+    """Filter video IDs by date and database existence, returning missing videos and counts."""
+    if not video_ids:
+        return [], 0, 0
 
-    if not filtered_metadata:
-        return [], 0, len(filtered_metadata)
+    existing_ids: set[str] = database.get_existing_video_ids(conn, video_ids)
+    missing_ids: list[str] = [vid for vid in video_ids if vid not in existing_ids]
 
-    filtered_ids: list[str] = [meta.video_id for meta in filtered_metadata]
-    existing_ids: set[str] = database.get_existing_video_ids(conn, filtered_ids)
+    total_count: int = len(video_ids)
+    skipped_count: int = total_count - len(missing_ids)
 
-    missing_metadata: list[VideoMetadata] = [vid for vid in filtered_metadata if vid.video_id not in existing_ids]
-
-    total_count: int = len(filtered_metadata)
-    skipped_count: int = total_count - len(missing_metadata)
-
-    return missing_metadata, total_count, skipped_count
+    return missing_ids, total_count, skipped_count
 
 
-def _process_batches(
+def _process_batches(  # noqa: C901, PLR0913, PLR0917
     conn: sqlite3.Connection,
-    missing_metadata: list[VideoMetadata],
+    missing_ids: list[str],
     batch_size: int,
     skipped_count: int,
     progress_callback: Callable[[int, int, str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> None:
-    """Iterate through missing metadata to fetch and save transcripts in batches."""
-    missing_count: int = len(missing_metadata)
+    """Iterate through missing IDs to fetch and save transcripts in batches."""
+    missing_count: int = len(missing_ids)
     fetched_transcript_count: int = 0
 
     for i in range(0, missing_count, batch_size):
@@ -420,8 +536,7 @@ def _process_batches(
                 progress_callback(fetched_transcript_count, missing_count, "Search aborted")
             return
 
-        batch_videos: list[VideoMetadata] = missing_metadata[i : i + batch_size]
-        missing_ids: list[str] = [vid.video_id for vid in batch_videos]
+        batch_ids: list[str] = missing_ids[i : i + batch_size]
 
         def _on_transcript_done() -> None:
             nonlocal fetched_transcript_count
@@ -438,7 +553,7 @@ def _process_batches(
                 )
 
         batch_transcript_results: list[TranscriptResult] = _get_transcripts(
-            video_ids=missing_ids,
+            video_ids=batch_ids,
             on_callback=_on_transcript_done,
             is_cancelled=is_cancelled,
         )
@@ -447,12 +562,28 @@ def _process_batches(
         batch_chunks: list[TranscriptSnippet]
         batch_status_map, batch_chunks = _prepare_batch_data(
             results=batch_transcript_results,
-            video_ids=missing_ids,
+            video_ids=batch_ids,
         )
+
+        batch_metadata: list[VideoMetadata] = []
+        for result in batch_transcript_results:
+            if result.metadata is not None:
+                batch_metadata.append(result.metadata)
+            else:
+                batch_metadata.append(
+                    VideoMetadata(
+                        video_id=result.video_id,
+                        title=None,
+                        channel=None,
+                        channel_id=None,
+                        upload_date=None,
+                        duration_seconds=None,
+                    ),
+                )
 
         database.batch_insert_videos(
             conn=conn,
-            metadata_batch=batch_videos,
+            metadata_batch=batch_metadata,
             status_map=batch_status_map,
             chunks=batch_chunks,
         )
@@ -473,17 +604,20 @@ def process_target(
     """Coordinate inserting transcript chunks from url in batches."""
     url: str = _build_url(search_params.target_id, search_params.source_type)
 
-    metadata: list[VideoMetadata] = _get_records(url, search_params.start_date)
-    if not metadata:
+    video_ids: list[str] = _get_video_count(
+        url=url,
+        start_date=search_params.start_date,
+        end_date=search_params.end_date,
+    )
+
+    if not video_ids:
         if progress_callback is not None:
             progress_callback(0, 0, f"{search_params.source_type} has no videos")
         return
 
-    missing_metadata, total_count, skipped_count = _filter_metadata(
-        conn,
-        metadata,
-        search_params.start_date,
-        search_params.end_date,
+    missing_ids, total_count, skipped_count = _filter_videos(
+        conn=conn,
+        video_ids=video_ids,
     )
 
     if total_count == 0:
@@ -491,14 +625,14 @@ def process_target(
             progress_callback(100, 100, f"{search_params.source_type} has no videos within the specified dates")
         return
 
-    if not missing_metadata:
+    if not missing_ids:
         if progress_callback is not None:
             progress_callback(100, 100, "All videos are already processed")
         return
 
     _process_batches(
         conn=conn,
-        missing_metadata=missing_metadata,
+        missing_ids=missing_ids,
         batch_size=batch_size,
         skipped_count=skipped_count,
         progress_callback=progress_callback,
