@@ -27,6 +27,7 @@ This project uses PyInstaller for packaging. To comply with the PySide6 LGPLv3 l
 Run either build script:
 
 `python pyinstaller_build.py`
+
 `python nuitka_build.py`
 
 This script automatically:
