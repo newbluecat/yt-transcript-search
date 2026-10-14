@@ -1,12 +1,12 @@
 # YouTube Transcript Search
 
-A cross-platform desktop application built with Python and PySide6 that searches, extracts, and downloads transcripts and metadata from YouTube channels, playlists, and individual videos. It is designed to be fully portable across Windows, macOS, and Linux by bundling all necessary runtime dependencies, including a localized JavaScript engine.
+A cross-platform desktop application built with Python and PySide6 that searches, extracts, and downloads transcripts and metadata from YouTube channels and playlists. It is designed to be fully portable across Windows, macOS, and Linux by bundling all necessary runtime dependencies, including a small Javascript engine.
 
 ## Features
 
-- **Multi-Source Support:** Search and extract content using exact Channel IDs, Playlist IDs, or handles (`@handle`).
-- **Tab-Specific Extraction:** Target specific channel tabs, separating standard uploads from Live Streams and Shorts.
-- **Efficient Metadata Scraping:** Uses flat extraction with approximate date parsing to rapidly fetch metadata without downloading full video pages or triggering API rate limits.
+- **Multi-Source Support:** Search and extract content from arbitrary playlists or channels.
+- **Tab-Specific Extraction:** Target specific channel tabs, with support for Videos, Live, and Shorts.
+- **Export as a CSV:** Download lists of searches as a CSV, for use in other applications or for saving.
 - **Cross-Platform Portability:** Distributed as a standalone application containing the QuickJS runtime and dynamic OS-specific architecture routing.
 
 ## Libraries Used
@@ -24,8 +24,6 @@ A cross-platform desktop application built with Python and PySide6 that searches
 ## Building and Packaging
 
 This project uses PyInstaller by default, but a Nuitka build script exists as well.
-
-To comply with the PySide6 LGPLv3 license, the application must be built using `--onedir` mode rather than `--onefile`. This ensures users can replace the shared Qt libraries if they choose.
 
 Run the PyInstaller build script with
 
@@ -46,6 +44,8 @@ This script automatically:
 - Sets up the localized `_MEIPASS` hooks for runtime data extraction.
 
 ## Licensing
+
+To comply with the PySide6 LGPLv3 license, the application was built with `--onedir` mode rather than `--onefile`. This ensures users can easily replace the shared Qt libraries if they choose.
 
 This project is licensed with the MIT License, placed in LICENSE.txt.
 
