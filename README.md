@@ -1,12 +1,13 @@
 # YouTube Transcript Search
 
-A cross-platform desktop application built with Python and PySide6 that searches, extracts, and downloads transcripts and metadata from YouTube channels and playlists. It is designed to be fully portable across Windows, macOS, and Linux by bundling all necessary runtime dependencies, including a small Javascript engine.
+A cross-platform desktop application built with Python and PySide6 that searches, extracts, and downloads transcripts and metadata from YouTube channels and playlists. It is designed to be fully portable across Windows, macOS, and Linux by bundling all necessary runtime dependencies, even embedding a small Javascript engine.
 
 ## Features
 
 - **Multi-Source Support:** Search and extract content from arbitrary playlists or channels.
 - **Tab-Specific Extraction:** Target specific channel tabs, with support for Videos, Live, and Shorts.
 - **Export as a CSV:** Download lists of searches as a CSV, for use in other applications or for saving.
+- **Date Filtering:** Filter and organize searches by date.
 - **Cross-Platform Portability:** Distributed as a standalone application containing the QuickJS runtime and dynamic OS-specific architecture routing.
 
 ## Libraries Used
@@ -23,9 +24,7 @@ A cross-platform desktop application built with Python and PySide6 that searches
 
 ## Building and Packaging
 
-This project uses PyInstaller by default, but a Nuitka build script exists as well.
-
-Run the PyInstaller build script with
+This project uses PyInstaller by default, but a Nuitka build script exists as well. Run the PyInstaller build script with
 
 `python3 pyinstaller_build.py`
 
