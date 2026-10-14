@@ -13,11 +13,11 @@ A cross-platform desktop application built with Python and PySide6 that searches
 
 - **PySide6:** Cross-platform graphical user interface.
 - **yt-dlp:** Core scraping and extraction engine.
-- **QuickJS:** Lightweight JavaScript engine used by `yt-dlp` to solve YouTube's client-side JavaScript challenges
+- **QuickJS:** Lightweight JavaScript engine used by `yt-dlp` to solve YouTube's client-side JavaScript challenges.
 - **SQLite3:** Local database management for transcript caching and querying.
 
 > [!NOTE]
-> The QuickJS versions in this repository use Fabrice Bellard's original QuickJS binary for Linux x86_86 and Windows x86_86. The other platforms use QuickJS-NG instead.
+> The QuickJS versions in this repository use Fabrice Bellard's original QuickJS binary for Linux x86_64 and Windows x86_64. The other platforms use QuickJS-NG instead.
 > 
 > If this is bothersome, please build the QuickJS binary on your own machine.
 
@@ -29,11 +29,11 @@ To comply with the PySide6 LGPLv3 license, the application must be built using `
 
 Run the PyInstaller build script with
 
-`python pyinstaller_build.py`
+`python3 pyinstaller_build.py`
 
 Or the Nuitka build script with
 
-`python nuitka_build.py`
+`python3 nuitka_build.py`
 
 This script automatically:
 
