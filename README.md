@@ -16,17 +16,22 @@ A cross-platform desktop application built with Python and PySide6 that searches
 - **QuickJS:** Lightweight JavaScript engine used by `yt-dlp` to solve YouTube's client-side JavaScript challenges
 - **SQLite3:** Local database management for transcript caching and querying.
 
-> Note: The QuickJS versions in this repository use Fabrice Bellard's original QuickJS binary for Linux x86_86 and Windows x86_86. The other platforms use QuickJS-NG instead.
+> [!NOTE]
+> The QuickJS versions in this repository use Fabrice Bellard's original QuickJS binary for Linux x86_86 and Windows x86_86. The other platforms use QuickJS-NG instead.
 > 
 > If this is bothersome, please build the QuickJS binary on your own machine.
 
 ## Building and Packaging
 
-This project uses PyInstaller for packaging. To comply with the PySide6 LGPLv3 license, the application must be built using `--onedir` mode rather than `--onefile`. This ensures users can replace the shared Qt libraries if they choose.
+This project uses PyInstaller by default, but a Nuitka build script exists as well.
 
-Run either build script:
+To comply with the PySide6 LGPLv3 license, the application must be built using `--onedir` mode rather than `--onefile`. This ensures users can replace the shared Qt libraries if they choose.
+
+Run the PyInstaller build script with
 
 `python pyinstaller_build.py`
+
+Or the Nuitka build script with
 
 `python nuitka_build.py`
 
