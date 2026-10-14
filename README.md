@@ -35,6 +35,9 @@ Or the Nuitka build script with
 
 `python3 nuitka_build.py`
 
+> [!WARNING]
+> You will have to set up the environment and install Nuitka yourself, as Nuitka is not included as a dependency.
+
 This script automatically:
 
 - Formats the application for the host OS.
