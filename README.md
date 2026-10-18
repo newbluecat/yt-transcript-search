@@ -10,12 +10,15 @@ A cross-platform desktop application built with Python and PySide6 that searches
 - **Date Filtering:** Filter and organize searches by date.
 - **Cross-Platform Portability:** Distributed as a standalone application containing the QuickJS runtime and dynamic OS-specific architecture routing.
 
-## Libraries Used
+## Libraries Used/Dependencies
 
 - **PySide6:** Cross-platform graphical user interface.
 - **yt-dlp:** Core scraping and extraction engine.
 - **QuickJS:** Lightweight JavaScript engine used by `yt-dlp` to solve YouTube's client-side JavaScript challenges.
 - **SQLite3:** Local database management for transcript caching and querying.
+- A working web browser that you use YouTube with (for cookies)
+- SQLite3 FTS5 extension
+    - Windows and MacOS should have it, but some minimal Linux distros may not.
 
 > [!NOTE]
 > The QuickJS versions in this repository use Fabrice Bellard's original QuickJS binary for Linux x86_64 and Windows x86_64. The other platforms use QuickJS-NG instead.
