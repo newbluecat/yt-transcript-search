@@ -37,7 +37,7 @@ def build_app() -> None:
     add_data_arg: str = f"{bin_path}{separator}."
 
     pyinstaller_args: list[str] = [
-        "main.py",
+        "src/yt_transcript_search/main.py",
         "--noconsole",
         "--onedir",
         f"--add-data={add_data_arg}",

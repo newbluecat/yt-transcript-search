@@ -54,7 +54,7 @@ def build_app() -> None:
         "--nofollow-import-to=PySide6.QtQml",
         "--nofollow-import-to=PyInstaller",
         "--nofollow-import-to=nuitka",
-        "main.py",
+        "src/yt_transcript_search/main.py",
     ]
 
     subprocess.run(nuitka_args, check=True)
