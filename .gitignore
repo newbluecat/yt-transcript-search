@@ -1,7 +1,10 @@
 # Custom ignores
+*.zip/
+
+# Generic databases
 *.db
-build/
-dist/
+
+# Nuitka files
 *.build/
 *.dist/
 
