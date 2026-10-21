@@ -23,15 +23,15 @@ A cross-platform desktop application built with Python and PySide6 that searches
 > [!NOTE]
 > The QuickJS versions in this repository use Fabrice Bellard's original QuickJS binary for Linux x86_64 and Windows x86_64. The other platforms use QuickJS-NG instead.
 > 
-> If this is bothersome, please build the QuickJS binary on your own machine.
+> If this is bothersome, you can build the QuickJS binary on your own machine.
 
 ## Building and Packaging
 
-This project uses PyInstaller by default, but a Nuitka build script exists as well. Run the PyInstaller build script with
+This project uses PyInstaller by default, but a Nuitka build script exists as well. Run the Nuitka build script with:
 
 `python3 pyinstaller_build.py`
 
-Or the Nuitka build script with
+Or the Nuitka build script with:
 
 `python3 nuitka_build.py`
 
