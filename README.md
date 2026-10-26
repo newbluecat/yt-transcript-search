@@ -1,4 +1,4 @@
-# bluecat's YouTube Transcript Search
+# yt-transcript-search
 
 A cross-platform desktop application built with Python and PySide6 that searches, extracts, and downloads transcripts and metadata from YouTube channels and playlists. It is designed to be fully portable across Windows, macOS, and Linux by bundling all necessary runtime dependencies, even embedding a small Javascript engine.
 
