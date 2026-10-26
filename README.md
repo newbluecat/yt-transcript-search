@@ -27,7 +27,7 @@ A cross-platform desktop application built with Python and PySide6 that searches
 
 ## Building and Packaging
 
-This project uses PyInstaller by default, but a Nuitka build script exists as well. Run the Nuitka build script with:
+This project uses PyInstaller by default, but a Nuitka build script exists as well. Run the PyInstaller build script with:
 
 `python3 pyinstaller_build.py`
 
