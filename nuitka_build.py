@@ -8,11 +8,12 @@ from pathlib import Path
 def build_app() -> None:
     """Build the application for targeted operating system."""
     is_windows: bool = os.name == "nt"
+    is_macos: bool = sys.platform == "darwin"
     exe_name: str = "quickjs.exe" if is_windows else "quickjs"
 
     if is_windows:
         os_dir: str = "win"
-    elif sys.platform == "darwin":
+    elif is_macos:
         os_dir = "mac"
     else:
         os_dir = "linux"
@@ -38,21 +39,28 @@ def build_app() -> None:
         "nuitka",
         "--standalone",
         "--disable-console",
+        "--output-filename=yt-transcript-search",
         "--jobs=1",
         "--low-memory",
         f"--include-data-files={bin_path}={exe_name}",
-        "--include-data-files=LICENSE.txt=LICENSE.txt",
-        "--include-data-files=THIRD-PARTY-NOTICES.txt=THIRD-PARTY-NOTICES.txt",
+        "--include-data-files=LICENSE.txt=LICENSE",
+        "--include-data-files=THIRD-PARTY-NOTICES.txt=THIRD-PARTY-NOTICES",
         "--enable-plugin=pyside6",
         "--include-package=yt_dlp",
         "--include-package=yt_dlp_ejs",
         "--include-package-data=requests",
+        "--include-package-data=certifi",
         "--nofollow-import-to=tkinter",
         "--nofollow-import-to=unittest",
         "--nofollow-import-to=PyInstaller",
         "--nofollow-import-to=nuitka",
         "src/yt_transcript_search/main.py",
     ]
+
+    if is_macos:
+        nuitka_args.append("--macos-create-app-bundle")
+
+    nuitka_args.append("src/yt_transcript_search/__main__.py")
 
     subprocess.run(nuitka_args, check=True)
 
