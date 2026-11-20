@@ -1,5 +1,8 @@
 # Custom ignores
 *.zip/
+*.svg
+*.png
+*.jpg
 
 # Generic databases
 *.db

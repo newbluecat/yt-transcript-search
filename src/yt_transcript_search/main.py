@@ -5,7 +5,9 @@ from PySide6.QtWidgets import QApplication
 
 from yt_transcript_search.main_window import MainWindow
 
-if __name__ == "__main__":
+
+def main() -> None:
+    """Act as entry point for this app."""
     logging.basicConfig(
         filename="error.log",
         level=logging.INFO,
@@ -17,3 +19,7 @@ if __name__ == "__main__":
     window: MainWindow = MainWindow()
     window.show()
     sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
